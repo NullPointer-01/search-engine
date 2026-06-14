@@ -1,0 +1,93 @@
+version: "3.9"
+
+services:
+  # ----------------------------
+  # Cassandra
+  # ----------------------------
+  cassandra:
+    image: cassandra:4.1
+    ports:
+      - "9042:9042"
+    environment:
+      CASSANDRA_CLUSTER_NAME: "SearchEngineCluster"
+      CASSANDRA_NUM_TOKENS: 256
+    volumes:
+      - cassandra_data:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  cassandra-init:
+    image: cassandra:4.1
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    volumes:
+      - ./storage/cassandra/init.cql:/init.cql
+      - ./storage/cassandra/init.sh:/init.sh
+    entrypoint: ["/init.sh"]
+
+  # ----------------------------
+  # Elasticsearch
+  # ----------------------------
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.1
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ----------------------------
+  # Crawler Service
+  # ----------------------------
+  crawler:
+    build: ./crawler
+    depends_on:
+      cassandra:
+        condition: service_healthy
+      cassandra-init:
+        condition: service_completed_successfully
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      CASSANDRA_HOST: cassandra
+      ELASTICSEARCH_HOST: elasticsearch
+      ES_INDEX: pages
+      START_URLS: ${START_URLS:-http://example.com}
+      MAX_PAGES: ${MAX_PAGES:-100}
+    command: ["python", "-m", "app.main"]
+
+  # ----------------------------
+  # Search API Service
+  # ----------------------------
+  api:
+    build: ./api
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      ELASTICSEARCH_HOST: elasticsearch
+      ELASTICSEARCH_PORT: "9200"
+      ES_INDEX: pages
+      SERVICE_NAME: search-api
+
+
+# ----------------------------
+# Docker volumes for persistence
+# ----------------------------
+volumes:
+  cassandra_data:
+  es_data:

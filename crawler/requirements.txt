@@ -1,0 +1,8 @@
+aiohttp>=3.9,<4
+beautifulsoup4>=4.12,<5
+lxml>=5.0
+cassandra-driver>=3.29,<4
+elasticsearch>=8.11,<9
+robotexclusionrulesparser>=1.6
+debugpy>=1.8
+pyyaml>=6.0

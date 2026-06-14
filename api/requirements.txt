@@ -1,0 +1,5 @@
+fastapi>=0.110,<1
+uvicorn[standard]>=0.29,<1
+elasticsearch>=8.11,<9
+pydantic>=2.0,<3
+python-multipart>=0.0.6,<1
