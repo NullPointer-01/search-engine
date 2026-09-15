@@ -1,0 +1,18 @@
+{
+  "INDEX_MAPPING": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0
+    },
+    "mappings": {
+      "properties": {
+        "url": { "type": "keyword" },
+        "title": { "type": "text", "analyzer": "english" },
+        "description": { "type": "text", "analyzer": "english" },
+        "body": { "type": "text", "analyzer": "english" },
+        "domain": { "type": "keyword" },
+        "crawled_at": { "type": "date" }
+      }
+    }
+  }
+}
