@@ -23,7 +23,7 @@ class Indexer:
             "title": title,
             "description": desc,
             "body": body,
-            "crawled_at": crawled_at,
+            "crawled_at": crawled_at.isoformat(),
         }
 
         try:

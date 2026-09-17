@@ -10,7 +10,6 @@
         "title": { "type": "text", "analyzer": "english" },
         "description": { "type": "text", "analyzer": "english" },
         "body": { "type": "text", "analyzer": "english" },
-        "domain": { "type": "keyword" },
         "crawled_at": { "type": "date" }
       }
     }
