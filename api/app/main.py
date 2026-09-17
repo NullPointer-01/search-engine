@@ -1,13 +1,18 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from .models import SearchResponse
 from .search import SearchClient
 
 from .config import ES_HOST, ES_PORT, ES_INDEX, MAX_RESULTS
+
+_STATIC_DIR = Path(__file__).parent.parent / "static"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,9 +39,16 @@ app = FastAPI(
 # Middleware
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"])
 
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
 
 @app.get("/")
 async def home():
+    return FileResponse(str(_STATIC_DIR / "index.html"))
+
+
+@app.get("/health")
+async def health():
     return {"status": "ok"}
 
 

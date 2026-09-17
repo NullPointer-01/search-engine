@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Search Engine</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: Arial, sans-serif;
+      background: #fff;
+      color: #202124;
+      min-height: 100vh;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 12px 24px;
+      border-bottom: 1px solid #e8eaed;
+    }
+
+    #logo {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #1a73e8;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    #search-form {
+      display: flex;
+      flex: 1;
+      max-width: 640px;
+      gap: 8px;
+    }
+
+    #search-input {
+      flex: 1;
+      padding: 10px 16px;
+      font-size: 1rem;
+      border: 1px solid #dfe1e5;
+      border-radius: 24px;
+      outline: none;
+      transition: box-shadow .15s;
+    }
+    #search-input:focus { box-shadow: 0 1px 6px rgba(0,0,0,.2); border-color: transparent; }
+
+    #search-btn {
+      padding: 10px 20px;
+      background: #1a73e8;
+      color: #fff;
+      border: none;
+      border-radius: 24px;
+      font-size: .95rem;
+      cursor: pointer;
+    }
+    #search-btn:hover { background: #1669c1; }
+
+    #hero {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 120px 24px 0;
+    }
+    #hero h1 { font-size: 3rem; color: #1a73e8; margin-bottom: 32px; }
+    #hero-form {
+      display: flex;
+      gap: 8px;
+      width: 100%;
+      max-width: 560px;
+    }
+    #hero-input {
+      flex: 1;
+      padding: 14px 20px;
+      font-size: 1rem;
+      border: 1px solid #dfe1e5;
+      border-radius: 24px;
+      outline: none;
+      box-shadow: 0 1px 6px rgba(0,0,0,.12);
+    }
+    #hero-btn {
+      padding: 14px 24px;
+      background: #1a73e8;
+      color: #fff;
+      border: none;
+      border-radius: 24px;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    #hero-btn:hover { background: #1669c1; }
+
+    #results-wrapper {
+      max-width: 660px;
+      margin: 0 auto;
+      padding: 16px 24px 40px;
+    }
+
+    #stats {
+      font-size: .85rem;
+      color: #70757a;
+      margin-bottom: 20px;
+    }
+
+    .result {
+      margin-bottom: 28px;
+    }
+    .result-url {
+      font-size: .8rem;
+      color: #202124;
+      margin-bottom: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .result-title {
+      font-size: 1.1rem;
+    }
+    .result-title a {
+      color: #1a0dab;
+      text-decoration: none;
+    }
+    .result-title a:hover { text-decoration: underline; }
+    .result-desc {
+      font-size: .9rem;
+      color: #4d5156;
+      margin-top: 4px;
+      line-height: 1.5;
+    }
+
+    #status {
+      text-align: center;
+      padding: 40px;
+      color: #70757a;
+      font-size: 1rem;
+    }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+<header id="header" class="hidden">
+  <a href="/" id="logo">Search</a>
+  <form id="search-form">
+    <input id="search-input" type="search" autocomplete="off" placeholder="Search the web…" />
+    <button id="search-btn" type="submit">Search</button>
+  </form>
+</header>
+
+<div id="hero">
+  <h1>Search</h1>
+  <form id="hero-form">
+    <input id="hero-input" type="search" autocomplete="off" placeholder="Search the web…" autofocus />
+    <button id="hero-btn" type="submit">Search</button>
+  </form>
+</div>
+
+<div id="results-wrapper" class="hidden">
+  <div id="stats"></div>
+  <div id="results-list"></div>
+  <div id="status"></div>
+</div>
+
+<script>
+  const PAGE_SIZE = 10;
+
+  const header         = document.getElementById("header");
+  const hero           = document.getElementById("hero");
+  const heroForm       = document.getElementById("hero-form");
+  const heroInput      = document.getElementById("hero-input");
+  const searchForm     = document.getElementById("search-form");
+  const searchInput    = document.getElementById("search-input");
+  const resultsWrapper = document.getElementById("results-wrapper");
+  const resultsList    = document.getElementById("results-list");
+  const statsEl        = document.getElementById("stats");
+  const statusEl       = document.getElementById("status");
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function renderResults(data) {
+    resultsList.innerHTML = "";
+    statusEl.textContent  = "";
+
+    if (!data.hits || data.hits.length === 0) {
+      statusEl.textContent = "No results found.";
+      statsEl.textContent  = "";
+      return;
+    }
+
+    statsEl.textContent =
+      `About ${data.total.toLocaleString()} result${data.total !== 1 ? "s" : ""} (${data.time_taken_ms} ms)`;
+
+    data.hits.forEach(hit => {
+      const div   = document.createElement("div");
+      div.className = "result";
+      const title = hit.title || hit.url;
+      div.innerHTML = `
+        <div class="result-url">${escapeHtml(hit.url)}</div>
+        <div class="result-title"><a href="${escapeHtml(hit.url)}" target="_blank" rel="noopener">${escapeHtml(title)}</a></div>
+        <div class="result-desc">${escapeHtml(hit.desc || "")}</div>
+      `;
+      resultsList.appendChild(div);
+    });
+  }
+
+  async function doSearch(query) {
+    hero.classList.add("hidden");
+    header.classList.remove("hidden");
+    resultsWrapper.classList.remove("hidden");
+    searchInput.value    = query;
+    statusEl.textContent = "Searching…";
+    resultsList.innerHTML = "";
+    statsEl.textContent   = "";
+
+    try {
+      const resp = await fetch(`/search?q=${encodeURIComponent(query)}&size=${PAGE_SIZE}`);
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        statusEl.textContent = body.detail || `Error ${resp.status}`;
+        return;
+      }
+      renderResults(await resp.json());
+    } catch {
+      statusEl.textContent = "Could not reach the search service. Is the API running?";
+    }
+  }
+
+  heroForm.addEventListener("submit", e => {
+    e.preventDefault();
+    const q = heroInput.value.trim();
+    if (q) doSearch(q);
+  });
+
+  searchForm.addEventListener("submit", e => {
+    e.preventDefault();
+    const q = searchInput.value.trim();
+    if (q) doSearch(q);
+  });
+</script>
+</body>
+</html>
