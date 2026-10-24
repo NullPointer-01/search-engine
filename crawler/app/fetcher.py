@@ -3,12 +3,24 @@ import aiohttp
 import hashlib
 import logging
 import random
+import time
+
 from urllib.parse import urlparse, urlunparse, urlencode, parse_qs
-from .config import MAX_RETRIES, RETRY_BACKOFF, FETCH_TIMEOUT, USER_AGENT
+from urllib.robotparser import RobotFileParser
+from .config import (
+    MAX_RETRIES,
+    RETRY_BACKOFF,
+    FETCH_TIMEOUT,
+    USER_AGENT,
+    MAX_REDIRECTS,
+    ROBOTS_MAX_BYTES,
+    ROBOTS_TTL,
+    ROBOTS_ERROR_TTL,
+)
 
 logger = logging.getLogger(__name__)
 
-_RETRY_STATUSES = frozenset({500, 502, 503, 504})
+_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 _STRIPPED_PARAMS = frozenset(
     {
         "utm_source",
@@ -41,6 +53,8 @@ def get_url_hash(url: str) -> str:
 class Fetcher:
     def __init__(self):
         self._session: aiohttp.ClientSession = None
+        # origin -> (parser, expires_at); parser None means "disallow all"
+        self._robots: dict[str, tuple[RobotFileParser | None, float]] = {}
 
     def _get_session(self):
         if self._session is None or self._session.closed:
@@ -51,12 +65,80 @@ class Fetcher:
 
         return self._session
 
+    def _origin(url: str) -> str:
+        parsed = urlparse(url)
+        return f"{parsed.scheme}://{parsed.netloc}"
+
+    def _cache_robots(
+        self, origin: str, parser: RobotFileParser | None, ttl: float
+    ) -> None:
+        self._robots[origin] = (parser, time.monotonic() + ttl)
+
+    async def _load_robots(self, origin: str) -> RobotFileParser | None:
+        session = self._get_session()
+        try:
+            async with session.get(
+                f"{origin}/robots.txt",
+                allow_redirects=True,
+                max_redirects=MAX_REDIRECTS,
+            ) as resp:
+                status = resp.status
+
+                if status == 200:
+                    raw = await resp.content.read(ROBOTS_MAX_BYTES)
+                    parser = RobotFileParser()
+                    parser.parse(raw.decode("utf-8", errors="ignore").splitlines())
+                    self._cache_robots(origin, parser, ROBOTS_TTL)
+                    return parser
+
+                # No robots.txt means everything is allowed
+                if 400 <= status < 500:
+                    parser = RobotFileParser()
+                    parser.parse([])
+                    self._cache_robots(origin, parser, ROBOTS_TTL)
+                    return parser
+
+                logger.warning(
+                    "robots.txt unavailable origin=%s status=%s", origin, status
+                )
+
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            logger.warning("Failed to fetch robots.txt origin=%s error=%s", origin, exc)
+
+        # If unreachable, disallow all, re-check after TTL
+        self._cache_robots(origin, None, ROBOTS_ERROR_TTL)
+        return None
+
+    async def _is_allowed(self, url: str) -> bool:
+        origin = self._origin(url)
+        cached = self._robots.get(origin)
+        parser = None
+
+        if cached is None or cached[1] < time.monotonic():
+            parser = await self._load_robots(origin)
+        else:
+            parser = cached[0]
+
+        if parser is None:
+            return False
+
+        return parser.can_fetch(USER_AGENT, url)
+
     async def fetch(self, url: str) -> tuple[str, str, int] | None:
+        # Check robots.txt
+        if not await self._is_allowed(url):
+            logger.info("Url disallowed: %s", url)
+            return None
+
         session = self._get_session()
 
         for attempt in range(MAX_RETRIES + 1):
+            status = None
+
             try:
-                async with session.get(url, allow_redirects=True) as resp:
+                async with session.get(
+                    url, allow_redirects=True, max_redirects=MAX_REDIRECTS
+                ) as resp:
                     status = resp.status
                     content_type = resp.headers.get("Content-Type", "")
 
@@ -68,26 +150,33 @@ class Fetcher:
                         return None
 
             except asyncio.TimeoutError as exc:
-                logger.warning(f"Request timed out: %s", exc)
+                logger.warning("Request timed out url=%s error=%s", url, exc)
+
+            except aiohttp.TooManyRedirects:
+                logger.warning("Too many redirects url=%s", url)
+                return None
 
             except aiohttp.ClientResponseError as exc:
-                logger.warning(f"HTTP error %s: %s", exc.status, exc.message)
+                logger.warning(
+                    "HTTP error url=%s status=%s error=%s", url, exc.status, exc.message
+                )
 
             except aiohttp.ClientError as exc:
                 logger.warning("Url fetch failed, url=%s error=%s", url, exc)
 
             # Skip sleep in last attempt
             if attempt < MAX_RETRIES:
-                delay = RETRY_BACKOFF + (2**attempt) + random.uniform(0, 0.5)
+                # Exponential backoff with jitter
+                delay = RETRY_BACKOFF * (2**attempt) + random.uniform(0, 0.5)
                 logger.warning(
                     "Retrying fetch url=%s status=%s attempt=%d",
                     url,
                     status,
                     attempt + 1,
                 )
-                await asyncio.sleep(delay=delay)
+                await asyncio.sleep(delay)
 
-        logger.error("Fetch failed url=%s")
+        logger.error("Fetch failed url=%s", url)
         return None
 
     async def close(self) -> None:
