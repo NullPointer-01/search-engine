@@ -10,6 +10,7 @@ ES_HOST = os.getenv("ES_HOST", "localhost")
 ES_PORT = os.getenv("ES_PORT", "9200")
 ES_INDEX = os.getenv("ES_INDEX", "search")
 
+# CRAWLER
 _seed_urls_raw = os.getenv("SEED_URLS", "http://localhost:20000")
 SEED_URLS: list[str] = [url.strip() for url in _seed_urls_raw.split(",") if url.strip()]
 
@@ -18,6 +19,7 @@ ALLOWED_DOMAINS: set[str] = {
     url.strip() for url in _allowed_domains_raw.split(",") if url.strip()
 }
 
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "10"))
 USER_AGENT = os.getenv("USER_AGENT", "MyCrawler/1.0")
 
 # RETRIES

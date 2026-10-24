@@ -17,6 +17,7 @@ from .config import (
     ES_INDEX,
     SEED_URLS,
     ALLOWED_DOMAINS,
+    BATCH_SIZE,
 )
 
 logging.basicConfig(
@@ -37,6 +38,7 @@ async def run_crawler() -> None:
 
         logger.info("Starting crawler")
 
+        # Populate seed urls
         for url in SEED_URLS:
             norm_url = normalize_url(url)
             url_hash = get_url_hash(norm_url)
@@ -46,50 +48,72 @@ async def run_crawler() -> None:
                 queue.append(norm_url)
 
         while queue:
-            norm_url = queue.popleft()
-            url_hash = get_url_hash(norm_url)
+            batch: list[tuple[str, str]] = []
 
-            # Skip if domain is restricted
-            parsed = urlparse(norm_url)
-            if ALLOWED_DOMAINS and parsed.hostname not in ALLOWED_DOMAINS:
-                logger.info(
-                    "Skipping restricted domain=%s, url=%s", parsed.hostname, norm_url
-                )
-                continue
-
-            # Skip duplicates
-            if store.check_exists(url_hash):
-                logger.info("Skipping url = %s since it is already indexed", norm_url)
-                continue
-
-            result = await fetcher.fetch(norm_url)
-
-            if result is None:
-                continue
-
-            content_type, content, status_code = result
-            try:
-                store.save_raw_page(
-                    url_hash, norm_url, content_type, content, status_code
-                )
-            except:
-                logger.error("Error while saving page in store, url = %s", norm_url)
-                pass
-
-            title, description, body, outgoing_urls = extract(norm_url, content)
-
-            crawled_at = datetime.now(timezone.utc)
-            indexed = indexer.index_document(
-                norm_url, url_hash, title, description, body, crawled_at
-            )
-
-            for url in outgoing_urls:
-                norm_url = normalize_url(url)
+            # Populate batch
+            while queue and len(batch) < BATCH_SIZE:
+                norm_url = queue.popleft()
                 url_hash = get_url_hash(norm_url)
 
-                if url_hash not in enqueued:
-                    enqueued.add(url_hash)
-                    queue.append(norm_url)
+                # Skip if domain is restricted
+                parsed = urlparse(norm_url)
+                if ALLOWED_DOMAINS and parsed.hostname not in ALLOWED_DOMAINS:
+                    logger.info(
+                        "Skipping restricted domain=%s, url=%s",
+                        parsed.hostname,
+                        norm_url,
+                    )
+                    continue
+
+                # Skip duplicates
+                if store.check_exists(url_hash):
+                    logger.info(
+                        "Skipping url = %s since it is already indexed", norm_url
+                    )
+                    continue
+
+                batch.append((norm_url, url_hash))
+
+            if not batch:
+                continue
+
+            # Fetch sites concurrently
+            results = await asyncio.gather(
+                *[fetcher.fetch(url) for url, _ in batch], return_exceptions=True
+            )
+
+            for (norm_url, url_hash), result in zip(batch, results):
+                result = await fetcher.fetch(norm_url)
+                if isinstance(result, Exception):
+                    logger.warning("Error during fetch: %s", result)
+                    continue
+
+                if result is None:
+                    continue
+
+                content_type, content, status_code = result
+                try:
+                    store.save_raw_page(
+                        url_hash, norm_url, content_type, content, status_code
+                    )
+                except:
+                    logger.error("Error while saving page in store, url = %s", norm_url)
+
+                title, description, body, outgoing_urls = extract(norm_url, content)
+
+                crawled_at = datetime.now(timezone.utc)
+                indexed = indexer.index_document(
+                    norm_url, url_hash, title, description, body, crawled_at
+                )
+
+                # Add outgoing links to the queue
+                for url in outgoing_urls:
+                    link_url = normalize_url(url)
+                    link_hash = get_url_hash(link_url)
+
+                    if link_hash not in enqueued:
+                        enqueued.add(link_hash)
+                        queue.append(link_url)
 
     finally:
         await fetcher.close()
