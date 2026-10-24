@@ -6,6 +6,7 @@ from .fetcher import Fetcher, normalize_url, get_url_hash
 from .extractor import extract
 from .store import Store
 from .indexer import Indexer
+from urllib.parse import urlparse
 
 from .config import (
     CASSANDRA_HOST,
@@ -15,6 +16,7 @@ from .config import (
     ES_PORT,
     ES_INDEX,
     SEED_URLS,
+    ALLOWED_DOMAINS,
 )
 
 logging.basicConfig(
@@ -37,15 +39,29 @@ async def run_crawler() -> None:
 
         for url in SEED_URLS:
             norm_url = normalize_url(url)
-            urL_hash = get_url_hash(norm_url)
+            url_hash = get_url_hash(norm_url)
 
-            if urL_hash not in enqueued:
-                enqueued.add(urL_hash)
+            if url_hash not in enqueued:
+                enqueued.add(url_hash)
                 queue.append(norm_url)
 
         while queue:
             norm_url = queue.popleft()
             url_hash = get_url_hash(norm_url)
+
+            # Skip if domain is restricted
+            parsed = urlparse(norm_url)
+            if ALLOWED_DOMAINS and parsed.hostname not in ALLOWED_DOMAINS:
+                logger.info(
+                    "Skipping restricted domain=%s, url=%s", parsed.hostname, norm_url
+                )
+                continue
+
+            # Skip duplicates
+            if store.check_exists(url_hash):
+                logger.info("Skipping url = %s since it is already indexed", norm_url)
+                continue
+
             result = await fetcher.fetch(norm_url)
 
             if result is None:
@@ -57,6 +73,7 @@ async def run_crawler() -> None:
                     url_hash, norm_url, content_type, content, status_code
                 )
             except:
+                logger.error("Error while saving page in store, url = %s", norm_url)
                 pass
 
             title, description, body, outgoing_urls = extract(norm_url, content)
@@ -68,10 +85,10 @@ async def run_crawler() -> None:
 
             for url in outgoing_urls:
                 norm_url = normalize_url(url)
-                urL_hash = get_url_hash(norm_url)
+                url_hash = get_url_hash(norm_url)
 
-                if norm_url not in enqueued:
-                    enqueued.add(norm_url)
+                if url_hash not in enqueued:
+                    enqueued.add(url_hash)
                     queue.append(norm_url)
 
     finally:

@@ -2,11 +2,13 @@ import asyncio
 import aiohttp
 import hashlib
 import logging
+import random
 from urllib.parse import urlparse, urlunparse, urlencode, parse_qs
-from .config import FETCH_TIMEOUT
+from .config import MAX_RETRIES, RETRY_BACKOFF, FETCH_TIMEOUT, USER_AGENT
 
 logger = logging.getLogger(__name__)
 
+_RETRY_STATUSES = frozenset({500, 502, 503, 504})
 _STRIPPED_PARAMS = frozenset(
     {
         "utm_source",
@@ -43,21 +45,50 @@ class Fetcher:
     def _get_session(self):
         if self._session is None or self._session.closed:
             timeout = aiohttp.ClientTimeout(total=FETCH_TIMEOUT)
-            self._session = aiohttp.ClientSession(timeout=timeout)
+            headers = {"User-Agent": USER_AGENT}
+
+            self._session = aiohttp.ClientSession(timeout=timeout, headers=headers)
 
         return self._session
 
-    async def fetch(self, url: str) -> tuple[str, str, str] | None:
+    async def fetch(self, url: str) -> tuple[str, str, int] | None:
         session = self._get_session()
-        async with session.get(url, allow_redirects=True) as resp:
-            status = resp.status
-            content_type = resp.headers.get("Content-Type", "")
 
-            if status == 200 and "text/html" in content_type:
-                content = await resp.text()
-                return content_type, content, status
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                async with session.get(url, allow_redirects=True) as resp:
+                    status = resp.status
+                    content_type = resp.headers.get("Content-Type", "")
 
-            return None
+                    if status == 200 and "text/html" in content_type:
+                        content = await resp.text()
+                        return content_type, content, status
+
+                    if status not in _RETRY_STATUSES:
+                        return None
+
+            except asyncio.TimeoutError as exc:
+                logger.warning(f"Request timed out: %s", exc)
+
+            except aiohttp.ClientResponseError as exc:
+                logger.warning(f"HTTP error %s: %s", exc.status, exc.message)
+
+            except aiohttp.ClientError as exc:
+                logger.warning("Url fetch failed, url=%s error=%s", url, exc)
+
+            # Skip sleep in last attempt
+            if attempt < MAX_RETRIES:
+                delay = RETRY_BACKOFF + (2**attempt) + random.uniform(0, 0.5)
+                logger.warning(
+                    "Retrying fetch url=%s status=%s attempt=%d",
+                    url,
+                    status,
+                    attempt + 1,
+                )
+                await asyncio.sleep(delay=delay)
+
+        logger.error("Fetch failed url=%s")
+        return None
 
     async def close(self) -> None:
         if self._session and not self._session.closed:

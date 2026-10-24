@@ -12,6 +12,10 @@ class Store:
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """)
 
+        self._check_page_exists = self._session.prepare("""
+        SELECT url_hash FROM pages WHERE url_hash = ?
+        """)
+
     def save_raw_page(
         self, url_hash: str, url: str, content_type: str, content: str, status_code: int
     ):
@@ -23,5 +27,13 @@ class Store:
                 self._insert_raw_page,
                 (url_hash, url, content_type, content, status_code, now, now),
             )
+        except Exception:
+            raise
+
+    def check_exists(self, url_hash: str) -> bool:
+        session = self._session
+        try:
+            rows = session.execute(self._check_page_exists, (url_hash,))
+            return rows.one() is not None
         except Exception:
             raise
