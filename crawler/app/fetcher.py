@@ -16,6 +16,8 @@ from .config import (
     ROBOTS_MAX_BYTES,
     ROBOTS_TTL,
     ROBOTS_ERROR_TTL,
+    CRAWL_DELAY,
+    MAX_CRAWL_DELAY,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,6 +58,9 @@ class Fetcher:
         # origin -> (parser, expires_at); parser None means "disallow all"
         self._robots: dict[str, tuple[RobotFileParser | None, float]] = {}
 
+        self._crawl_delay: dict[str, float] = {}
+        self._last_request_time: dict[str, float] = {}
+
     def _get_session(self):
         if self._session is None or self._session.closed:
             timeout = aiohttp.ClientTimeout(total=FETCH_TIMEOUT)
@@ -65,7 +70,7 @@ class Fetcher:
 
         return self._session
 
-    def _origin(url: str) -> str:
+    def _origin(self, url: str) -> str:
         parsed = urlparse(url)
         return f"{parsed.scheme}://{parsed.netloc}"
 
@@ -73,6 +78,9 @@ class Fetcher:
         self, origin: str, parser: RobotFileParser | None, ttl: float
     ) -> None:
         self._robots[origin] = (parser, time.monotonic() + ttl)
+
+        delay = parser.crawl_delay(USER_AGENT) if parser is not None else None
+        self._crawl_delay[origin] = delay or 0
 
     async def _load_robots(self, origin: str) -> RobotFileParser | None:
         session = self._get_session()
@@ -109,6 +117,17 @@ class Fetcher:
         self._cache_robots(origin, None, ROBOTS_ERROR_TTL)
         return None
 
+    async def _throttle(self, origin: str) -> None:
+        elapsed = time.monotonic() - self._last_request_time.get(origin, 0)
+        delay = max(CRAWL_DELAY, self._crawl_delay.get(origin, 0))
+
+        # Cap delay to avoid indefinite sleep
+        delay = min(delay, MAX_CRAWL_DELAY)
+
+        if elapsed < delay:
+            wait = delay - elapsed
+            await asyncio.sleep(wait)
+
     async def _is_allowed(self, url: str) -> bool:
         origin = self._origin(url)
         cached = self._robots.get(origin)
@@ -131,9 +150,12 @@ class Fetcher:
             return None
 
         session = self._get_session()
+        origin = self._origin(url)
 
         for attempt in range(MAX_RETRIES + 1):
             status = None
+            await self._throttle(origin)
+            self._last_request_time[origin] = time.monotonic()
 
             try:
                 async with session.get(

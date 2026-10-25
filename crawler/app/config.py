@@ -22,6 +22,9 @@ ALLOWED_DOMAINS: set[str] = {
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "10"))
 USER_AGENT = os.getenv("USER_AGENT", "MyCrawler/1.0")
 
+CRAWL_DELAY = float(os.getenv("CRAWL_DELAY", "1.0"))
+MAX_CRAWL_DELAY = float(os.getenv("MAX_CRAWL_DELAY", "30.0"))
+
 # RETRIES
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
 RETRY_BACKOFF = float(os.getenv("RETRY_BACKOFF", "1.0"))
