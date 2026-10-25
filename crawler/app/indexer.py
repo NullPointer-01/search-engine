@@ -1,7 +1,10 @@
+import logging
 from datetime import datetime
 
 from elasticsearch import Elasticsearch
 from elasticsearch import ApiError
+
+logger = logging.getLogger(__name__)
 
 
 class Indexer:
@@ -29,5 +32,11 @@ class Indexer:
         try:
             self._client.index(index=self._index, id=url_hash, document=doc)
             return True
-        except ApiError:
+        except ApiError as exc:
+            logger.error(
+                "Elasticsearch index failed for document url = %s status = %s error = %s",
+                norm_url,
+                exc.status_code,
+                exc.message,
+            )
             return False

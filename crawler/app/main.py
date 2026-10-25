@@ -66,7 +66,15 @@ async def run_crawler() -> None:
                     continue
 
                 # Skip duplicates
-                if store.check_exists(url_hash):
+                try:
+                    exists = store.check_exists(url_hash)
+                except Exception:
+                    logger.exception(
+                        "Error while checking url in store, url = %s", norm_url
+                    )
+                    continue
+
+                if exists:
                     logger.info(
                         "Skipping url = %s since it is already indexed", norm_url
                     )
@@ -83,9 +91,10 @@ async def run_crawler() -> None:
             )
 
             for (norm_url, url_hash), result in zip(batch, results):
-                result = await fetcher.fetch(norm_url)
-                if isinstance(result, Exception):
-                    logger.warning("Error during fetch: %s", result)
+                if isinstance(result, BaseException):
+                    logger.warning(
+                        "Error during fetch url = %s error = %r", norm_url, result
+                    )
                     continue
 
                 if result is None:
@@ -96,15 +105,28 @@ async def run_crawler() -> None:
                     store.save_raw_page(
                         url_hash, norm_url, content_type, content, status_code
                     )
-                except:
-                    logger.error("Error while saving page in store, url = %s", norm_url)
+                except Exception:
+                    logger.exception(
+                        "Error while saving page in store, url = %s", norm_url
+                    )
 
-                title, description, body, outgoing_urls = extract(norm_url, content)
+                try:
+                    title, description, body, outgoing_urls = extract(norm_url, content)
+                except Exception:
+                    logger.exception("Error while extracting page, url = %s", norm_url)
+                    continue
 
                 crawled_at = datetime.now(timezone.utc)
-                indexed = indexer.index_document(
-                    norm_url, url_hash, title, description, body, crawled_at
-                )
+                try:
+                    indexed = indexer.index_document(
+                        norm_url, url_hash, title, description, body, crawled_at
+                    )
+                    if not indexed:
+                        logger.error(
+                            "Elasticsearch index document failed, url = %s", norm_url
+                        )
+                except Exception:
+                    logger.exception("Error while indexing page, url = %s", norm_url)
 
                 # Add outgoing links to the queue
                 for url in outgoing_urls:
