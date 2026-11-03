@@ -18,6 +18,8 @@ from .config import (
     SEED_URLS,
     ALLOWED_DOMAINS,
     BATCH_SIZE,
+    MAX_DEPTH,
+    MAX_OUTGOING_LINKS,
     INDEX_MAX_RETRIES,
 )
 
@@ -34,7 +36,7 @@ class Crawler:
         self._indexer = indexer
         self._fetcher = fetcher
 
-        self._queue: deque[str] = deque()
+        self._queue: deque[tuple[str, int]] = deque()
         self._enqueued: set[str] = set()
 
         # (norm_url, url_hash, retry count)
@@ -44,7 +46,7 @@ class Crawler:
         logger.info("Starting crawler")
 
         for url in SEED_URLS:
-            self._enqueue(url)
+            self._enqueue(url, 0)
 
         while self._queue or self._retry_queue:
             # Retry failed sites if main queue is empty
@@ -58,30 +60,33 @@ class Crawler:
 
             # Fetch sites concurrently
             results = await asyncio.gather(
-                *[self._fetcher.fetch(norm_url) for norm_url, _ in batch],
+                *[self._fetcher.fetch(norm_url) for norm_url, _, _ in batch],
                 return_exceptions=True,
             )
 
-            for (norm_url, url_hash), result in zip(batch, results):
-                self._process_result(norm_url, url_hash, result)
+            for (norm_url, url_hash, depth), result in zip(batch, results):
+                self._process_result(norm_url, url_hash, depth, result)
 
-    def _enqueue(self, url: str) -> None:
+    def _enqueue(self, url: str, depth: int = 0) -> bool:
         norm_url = normalize_url(url)
         url_hash = get_url_hash(norm_url)
 
-        if url_hash not in self._enqueued:
-            self._enqueued.add(url_hash)
-            self._queue.append(norm_url)
+        if url_hash in self._enqueued:
+            return False
 
-    def _next_batch(self) -> list[tuple[str, str]]:
-        batch: list[tuple[str, str]] = []
+        self._enqueued.add(url_hash)
+        self._queue.append((norm_url, depth))
+        return True
+
+    def _next_batch(self) -> list[tuple[str, str, int]]:
+        batch: list[tuple[str, str, int]] = []
 
         while self._queue and len(batch) < BATCH_SIZE:
-            norm_url = self._queue.popleft()
+            norm_url, depth = self._queue.popleft()
             url_hash = get_url_hash(norm_url)
 
             if not self._should_skip(norm_url, url_hash):
-                batch.append((norm_url, url_hash))
+                batch.append((norm_url, url_hash, depth))
 
         return batch
 
@@ -104,7 +109,7 @@ class Crawler:
 
         return False
 
-    def _process_result(self, norm_url: str, url_hash: str, result) -> None:
+    def _process_result(self, norm_url: str, url_hash: str, depth: int, result) -> None:
         if isinstance(result, BaseException):
             logger.warning("Error during fetch url = %s error = %r", norm_url, result)
             return
@@ -139,9 +144,15 @@ class Crawler:
                 datetime.now(timezone.utc),
             )
 
-        # Enqueue outgoing links regardless of indexing status
-        for url in outgoing_urls:
-            self._enqueue(url)
+        # Already seen urls do not count towards the MAX_OUTGOING_LINKS cap
+        if depth < MAX_DEPTH:
+            queued = 0
+            for url in outgoing_urls:
+                if queued >= MAX_OUTGOING_LINKS:
+                    break
+
+                if self._enqueue(url, depth + 1):
+                    queued += 1
 
     def _index_page(
         self,
