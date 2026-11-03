@@ -8,5 +8,6 @@ CREATE TABLE IF NOT EXISTS search.pages (
   content TEXT,
   status_code INT,
   created_at TIMESTAMP,
-  last_crawled_at TIMESTAMP
+  last_crawled_at TIMESTAMP,
+  indexed_at TIMESTAMP
 );
