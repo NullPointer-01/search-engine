@@ -5,6 +5,8 @@ import logging
 import random
 import time
 
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse, urlunparse, urlencode, parse_qs
 from urllib.robotparser import RobotFileParser
 from .config import (
@@ -154,6 +156,8 @@ class Fetcher:
 
         for attempt in range(MAX_RETRIES + 1):
             status = None
+            retry_after = 0
+
             await self._throttle(origin)
             self._last_request_time[origin] = time.monotonic()
 
@@ -167,6 +171,11 @@ class Fetcher:
                     if status == 200 and "text/html" in content_type:
                         content = await resp.text()
                         return content_type, content, status
+
+                    if status in (429, 503):
+                        retry_after = self._parse_retry_after(
+                            resp.headers.get("Retry-After")
+                        )
 
                     if status not in _RETRY_STATUSES:
                         return None
@@ -188,8 +197,14 @@ class Fetcher:
 
             # Skip sleep in last attempt
             if attempt < MAX_RETRIES:
-                # Exponential backoff with jitter
-                delay = RETRY_BACKOFF * (2**attempt) + random.uniform(0, 0.5)
+                # Exponential backoff with jitter, or Retry-After
+                delay = min(
+                    max(
+                        retry_after,
+                        RETRY_BACKOFF * (2**attempt) + random.uniform(0, 0.5),
+                    ),
+                    MAX_CRAWL_DELAY,
+                )
                 logger.warning(
                     "Retrying fetch url=%s status=%s attempt=%d",
                     url,
@@ -200,6 +215,25 @@ class Fetcher:
 
         logger.error("Fetch failed url=%s", url)
         return None
+
+    def parse_retry_after(value: str | None) -> float:
+        if not value:
+            return 0.0
+
+        # Handle float values
+        value = value.strip()
+        if value.isdigit():
+            return float(value)
+
+        # Handle timestamps
+        try:
+            wait = (
+                parsedate_to_datetime(value) - datetime.now(timezone.utc)
+            ).total_seconds()
+        except (TypeError, ValueError):
+            return 0.0
+
+        return max(wait, 0.0)
 
     async def close(self) -> None:
         if self._session and not self._session.closed:
