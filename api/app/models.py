@@ -1,6 +1,12 @@
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+class Highlight(BaseModel):
+    title: str = ""
+    description: str = ""
+    body: list[str] = Field(default_factory=list)
 
 
 class SearchHit(BaseModel):
@@ -8,6 +14,7 @@ class SearchHit(BaseModel):
     title: str
     desc: str
     score: float
+    highlight: Highlight = Field(default_factory=Highlight)
 
 
 class SearchResponse(BaseModel):

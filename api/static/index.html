@@ -130,6 +130,13 @@
       margin-top: 4px;
       line-height: 1.5;
     }
+    .result-title mark,
+    .result-desc mark {
+      background: #fff3a3;
+      color: inherit;
+      border-radius: 2px;
+      padding: 0 1px;
+    }
 
     #status {
       text-align: center;
@@ -203,11 +210,19 @@
     data.hits.forEach(hit => {
       const div   = document.createElement("div");
       div.className = "result";
-      const title = hit.title || hit.url;
+
+      <!-- Html from highlight is already encoded -->
+      const hl = hit.highlight || {};
+      const titleHtml = hl.title || escapeHtml(hit.title || hit.url);
+      const snippetHtml =
+        (hl.body && hl.body.length ? hl.body.join(" … ") : "") ||
+        hl.description ||
+        escapeHtml(hit.desc || "");
+
       div.innerHTML = `
         <div class="result-url">${escapeHtml(hit.url)}</div>
-        <div class="result-title"><a href="${escapeHtml(hit.url)}" target="_blank" rel="noopener">${escapeHtml(title)}</a></div>
-        <div class="result-desc">${escapeHtml(hit.desc || "")}</div>
+        <div class="result-title"><a href="${escapeHtml(hit.url)}" target="_blank" rel="noopener">${titleHtml}</a></div>
+        <div class="result-desc">${snippetHtml}</div>
       `;
       resultsList.appendChild(div);
     });
