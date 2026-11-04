@@ -22,6 +22,7 @@ ALLOWED_DOMAINS: set[str] = {
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "10"))
 MAX_DEPTH = int(os.getenv("MAX_DEPTH", "3"))
 MAX_OUTGOING_LINKS = int(os.getenv("MAX_OUTGOING_LINKS", "100"))
+MAX_CONTENT_SIZE = int(os.getenv("MAX_CONTENT_SIZE", 2 * 1024 * 1024))
 USER_AGENT = os.getenv("USER_AGENT", "MyCrawler/1.0")
 
 CRAWL_DELAY = float(os.getenv("CRAWL_DELAY", "1.0"))

@@ -20,6 +20,7 @@ from .config import (
     ROBOTS_ERROR_TTL,
     CRAWL_DELAY,
     MAX_CRAWL_DELAY,
+    MAX_CONTENT_SIZE,
 )
 
 logger = logging.getLogger(__name__)
@@ -169,7 +170,30 @@ class Fetcher:
                     content_type = resp.headers.get("Content-Type", "")
 
                     if status == 200 and "text/html" in content_type:
-                        content = await resp.text()
+                        chunks: list[bytes] = []
+                        size = 0
+
+                        async for chunk in resp.content.iter_chunked(8192):
+                            chunks.append(chunk)
+                            size += len(chunk)
+
+                            if size > MAX_CONTENT_SIZE:
+                                logger.warning(
+                                    "Response truncated url=%s limit=%d bytes",
+                                    url,
+                                    MAX_CONTENT_SIZE,
+                                )
+                                break
+
+                        raw = b"".join(chunks)[:MAX_CONTENT_SIZE]
+
+                        try:
+                            content = raw.decode(
+                                resp.charset or "utf-8", errors="replace"
+                            )
+                        except LookupError:
+                            content = raw.decode("utf-8", errors="replace")
+
                         return content_type, content, status
 
                     if status in (429, 503):
