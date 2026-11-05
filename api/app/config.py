@@ -5,6 +5,7 @@ ES_PORT = os.getenv("ES_PORT", "9200")
 ES_INDEX = os.getenv("ES_INDEX", "search")
 
 MAX_RESULTS = int(os.getenv("MAX_RESULTS", 50))
+MAX_QUERY_LENGTH = int(os.getenv("MAX_QUERY_LENGTH", 20))
 HIGHLIGHT_FRAGMENTS_COUNT = int(os.getenv("HIGHLIGHT_FRAGMENTS_COUNT", 2))
 HIGHLIGHT_FRAGMENTS_SIZE = int(os.getenv("HIGHLIGHT_FRAGMENTS_SIZE", 200))
 
