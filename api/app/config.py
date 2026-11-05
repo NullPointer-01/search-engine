@@ -6,6 +6,9 @@ ES_INDEX = os.getenv("ES_INDEX", "search")
 
 MAX_RESULTS = int(os.getenv("MAX_RESULTS", 50))
 MAX_QUERY_LENGTH = int(os.getenv("MAX_QUERY_LENGTH", 20))
+
+SEARCH_RATE_LIMIT = os.getenv("SEARCH_RATE_LIMIT", "10/minute")
+
 HIGHLIGHT_FRAGMENTS_COUNT = int(os.getenv("HIGHLIGHT_FRAGMENTS_COUNT", 2))
 HIGHLIGHT_FRAGMENTS_SIZE = int(os.getenv("HIGHLIGHT_FRAGMENTS_SIZE", 200))
 

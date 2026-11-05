@@ -5,12 +5,22 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from .models import SearchResponse
 from .search import SearchClient
 
-from .config import ES_HOST, ES_PORT, ES_INDEX, MAX_RESULTS, MAX_QUERY_LENGTH
+from .config import (
+    ES_HOST,
+    ES_PORT,
+    ES_INDEX,
+    MAX_RESULTS,
+    MAX_QUERY_LENGTH,
+    SEARCH_RATE_LIMIT,
+)
 
 _STATIC_DIR = Path(__file__).parent.parent / "static"
 
@@ -20,6 +30,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 _search_client: SearchClient | None = None
+
+# Rate limiting per client IP
+limiter = Limiter(key_func=get_remote_address, headers_enabled=True)
 
 
 @asynccontextmanager
@@ -35,6 +48,20 @@ app = FastAPI(
     description="Search over crawled web pages",
     lifespan=lifespan,
 )
+
+app.state.limiter = limiter
+
+
+async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    response = JSONResponse(
+        status_code=429, content={"detail": f"Rate limit exceeded: {exc.detail}"}
+    )
+    return request.app.state.limiter._inject_headers(
+        response, request.state.view_rate_limit
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 # Middleware
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"])
@@ -53,6 +80,7 @@ async def health():
 
 
 @app.get("/search", response_model=SearchResponse)
+@limiter.limit(SEARCH_RATE_LIMIT)
 async def search(
     request: Request,
     q: str = Query("", description="Search query"),
