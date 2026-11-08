@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -83,6 +83,7 @@ async def health():
 @limiter.limit(SEARCH_RATE_LIMIT)
 async def search(
     request: Request,
+    response: Response,
     q: str = Query("", description="Search query"),
     size: int = Query(default=10, description="Number of results to return"),
 ):
